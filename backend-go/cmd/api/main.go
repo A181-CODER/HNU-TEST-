@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +32,15 @@ func main() {
 		}
 	}
 	s := &httpapi.Server{DB: db, Auth: auth.Service{Secret: []byte(secret), AccessTTL: ttl}, Logger: logger, CORS: getenv("CORS_ORIGINS", "http://localhost:5173")}
+	if db != nil {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				s.AutoSubmitExpired(context.Background())
+			}
+		}()
+	}
 	logger.Info("starting HNU TEST API", "port", port)
 	if err := http.ListenAndServe(":"+port, s.Routes()); err != nil {
 		logger.Error("server stopped", "error", err)
@@ -45,5 +54,3 @@ func getenv(k, d string) string {
 	}
 	return v
 }
-
-var _ = strconv.Itoa
