@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info:
+  title: HNU TEST API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get: {responses: {'200': {description: Healthy}}}
+  /ready:
+    get: {responses: {'200': {description: Ready}, '503': {description: Not ready}}}
+  /api/v1/auth/login:
+    post:
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/LoginRequest'}}}
+      responses: {'200': {description: Authenticated}, '401': {description: Invalid credentials}}
+  /api/v1/me:
+    get:
+      security: [{bearerAuth: []}]
+      responses: {'200': {description: Identity}, '401': {description: Unauthorized}}
+  /api/v1/exams:
+    get:
+      security: [{bearerAuth: []}]
+      responses: {'200': {description: Exams}}
+    post:
+      security: [{bearerAuth: []}]
+      responses: {'201': {description: Draft created}, '403': {description: Forbidden}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}

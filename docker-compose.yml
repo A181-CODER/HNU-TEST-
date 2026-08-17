@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hnu_test}
+      POSTGRES_USER: ${POSTGRES_USER:-hnu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hnu_dev_password}
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hnu} -d ${POSTGRES_DB:-hnu_test}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend-go
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8080
+      DATABASE_URL: ${DATABASE_URL:-postgres://hnu:hnu_dev_password@postgres:5432/hnu_test?sslmode=disable}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-me-please}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
+      REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      PROCTORING_URL: ${PROCTORING_URL:-http://python-proctoring:8000}
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  python-proctoring:
+    build: ./ai-proctoring-python
+    ports: ["8000:8000"]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api/v1}
+    ports: ["5173:80"]
+    depends_on: [backend]
+
+volumes:
+  postgres_data:
