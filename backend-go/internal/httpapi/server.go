@@ -21,10 +21,12 @@ import (
 )
 
 type Server struct {
-	DB     *sql.DB
-	Auth   auth.Service
-	Logger *slog.Logger
-	CORS   string
+	DB            *sql.DB
+	Auth          auth.Service
+	Logger        *slog.Logger
+	CORS          string
+	Hub           *ProctorHub
+	ProctoringURL string
 }
 
 type contextKey string
@@ -159,7 +161,12 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /api/v1/attempts/{id}/submit", s.requireRole(http.HandlerFunc(s.submitAttempt)))
 	mux.Handle("GET /api/v1/attempts/{id}/result", s.requireRole(http.HandlerFunc(s.attemptResult)))
 	mux.Handle("POST /api/v1/attempts/{id}/proctoring-events", s.requireRole(http.HandlerFunc(s.proctoringEvent)))
+	mux.Handle("POST /api/v1/attempts/{id}/proctoring-signal", s.requireRole(http.HandlerFunc(s.proctoringSignal)))
+	mux.Handle("GET /api/v1/proctoring/active-attempts", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.activeProctoring)))
+	mux.Handle("GET /api/v1/proctoring/attempts/{id}/events", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.proctoringEvents)))
+	mux.Handle("POST /api/v1/proctoring/events/{eventId}/review", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.reviewProctoringEvent)))
 	mux.Handle("GET /api/v1/instructor/exams/{id}/results", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.instructorResults)))
+	mux.Handle("GET /api/v1/proctoring/ws", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.proctoringWebSocket)))
 	mux.Handle("POST /api/v1/results/{id}/publish", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.publishResult)))
 	return s.middleware(mux)
 }
@@ -170,7 +177,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' http://localhost:8080 http://localhost:8000; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' http://localhost:8080 http://localhost:8000 ws://localhost:8080; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'")
 		w.Header().Set("Access-Control-Allow-Origin", s.CORS)
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -251,7 +258,13 @@ func (s *Server) requireAnyRole(roles []string) func(http.Handler) http.Handler 
 	}
 }
 func (s *Server) claims(r *http.Request) (*auth.Claims, error) {
-	return s.Auth.Parse(r.Header.Get("Authorization"))
+	authorization := r.Header.Get("Authorization")
+	if authorization == "" && r.URL.Path == "/api/v1/proctoring/ws" {
+		if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
+			authorization = "Bearer " + token
+		}
+	}
+	return s.Auth.Parse(authorization)
 }
 func claimsOf(r *http.Request) *auth.Claims {
 	c, _ := r.Context().Value(claimsKey).(*auth.Claims)
@@ -853,42 +866,6 @@ func (s *Server) publishResult(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r.Context(), c.UserID, "RESULT_PUBLISHED", "results", id, "SUCCESS", map[string]interface{}{})
 	write(w, 200, map[string]interface{}{"id": id.String(), "published": true})
-}
-
-func (s *Server) proctoringEvent(w http.ResponseWriter, r *http.Request) {
-	attemptID, err := parseUUID(r.PathValue("id"))
-	if err != nil {
-		write(w, 400, map[string]string{"error": "invalid attempt id"})
-		return
-	}
-	var in proctorEventInput
-	if !decode(w, r, &in) {
-		return
-	}
-	if in.EventType == "" || in.Confidence < 0 || in.Confidence > 1 {
-		write(w, 400, map[string]string{"error": "eventType and confidence 0..1 are required"})
-		return
-	}
-	c := claimsOf(r)
-	if !s.canAccessAttempt(r.Context(), attemptID, c) {
-		write(w, 403, map[string]string{"error": "attempt access denied"})
-		return
-	}
-	meta, _ := json.Marshal(in.Metadata)
-	var psID string
-	err = s.DB.QueryRowContext(r.Context(), `SELECT id FROM proctoring_sessions WHERE attempt_id=$1`, attemptID).Scan(&psID)
-	if err != nil {
-		write(w, 409, map[string]string{"error": "proctoring session not found"})
-		return
-	}
-	id := uuid.New()
-	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO proctoring_events(id,proctoring_session_id,event_type,confidence,metadata) VALUES($1,$2,$3,$4,$5)`, id, psID, in.EventType, in.Confidence, meta)
-	if err != nil {
-		write(w, 500, map[string]string{"error": "could not save proctoring event"})
-		return
-	}
-	s.audit(r.Context(), c.UserID, "PROCTORING_EVENT_CREATED", "proctoring_events", id, "SUCCESS", map[string]interface{}{"attemptId": attemptID.String()})
-	write(w, 201, map[string]interface{}{"id": id, "status": "recorded"})
 }
 
 func (s *Server) persistQuestionSet(ctx context.Context, tx *sql.Tx, attemptID, examID uuid.UUID, randomQuestions, randomOptions bool) error {

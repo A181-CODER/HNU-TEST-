@@ -1,0 +1,13 @@
+ALTER TABLE proctoring_events ADD COLUMN IF NOT EXISTS severity varchar(16) NOT NULL DEFAULT 'info' CHECK(severity IN ('info','low','medium','high','critical'));
+ALTER TABLE proctoring_events ADD COLUMN IF NOT EXISTS risk_score numeric(6,3) NOT NULL DEFAULT 0 CHECK(risk_score BETWEEN 0 AND 100);
+ALTER TABLE proctoring_events ADD COLUMN IF NOT EXISTS source varchar(40) NOT NULL DEFAULT 'browser';
+ALTER TABLE proctoring_events ADD COLUMN IF NOT EXISTS review_status varchar(24) NOT NULL DEFAULT 'open' CHECK(review_status IN ('open','confirmed','dismissed','needs_followup'));
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS connection_status varchar(24) NOT NULL DEFAULT 'unknown' CHECK(connection_status IN ('unknown','connected','degraded','offline','ended'));
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS last_heartbeat_at timestamptz;
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS last_signal_at timestamptz;
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS last_face_count integer NOT NULL DEFAULT 0 CHECK(last_face_count BETWEEN 0 AND 10);
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS risk_score numeric(6,3) NOT NULL DEFAULT 0 CHECK(risk_score BETWEEN 0 AND 100);
+ALTER TABLE proctoring_sessions ADD COLUMN IF NOT EXISTS monitoring_status varchar(24) NOT NULL DEFAULT 'starting' CHECK(monitoring_status IN ('starting','monitoring','attention','ended'));
+CREATE INDEX IF NOT EXISTS idx_proctoring_events_attempt_time ON proctoring_events(proctoring_session_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proctoring_events_open_severity ON proctoring_events(review_status, severity, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proctoring_sessions_live ON proctoring_sessions(connection_status, monitoring_status, last_heartbeat_at DESC);

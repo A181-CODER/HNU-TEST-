@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: HNU TEST API
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: http://localhost:8080
 paths:
@@ -26,6 +26,44 @@ paths:
     post:
       security: [{bearerAuth: []}]
       responses: {'201': {description: Draft created}, '403': {description: Forbidden}}
+  /api/v1/attempts/{id}/proctoring-events:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ProctorEventInput'}}}
+      responses: {'201': {description: Event recorded}, '403': {description: Forbidden}}
+  /api/v1/attempts/{id}/proctoring-signal:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ProctorSignalInput'}}}
+      responses: {'201': {description: Analyzed event}, '200': {description: Heartbeat/no suspicious event}, '503': {description: Analyzer unavailable}}
+  /api/v1/proctoring/active-attempts:
+    get:
+      security: [{bearerAuth: []}]
+      responses: {'200': {description: Active monitoring sessions}}
+  /api/v1/proctoring/attempts/{id}/events:
+    get:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Recent events}}
+  /api/v1/proctoring/events/{eventId}/review:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: eventId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ReviewInput'}}}
+      responses: {'200': {description: Review saved}, '404': {description: Event not found}}
+  /api/v1/proctoring/ws:
+    get:
+      description: WebSocket upgrade endpoint. Pass a short-lived JWT in the token query parameter because browsers cannot set Authorization during the initial handshake.
+      parameters: [{name: token, in: query, required: true, schema: {type: string}}]
+      responses: {'101': {description: Switching Protocols}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -36,3 +74,28 @@ components:
       properties:
         email: {type: string, format: email}
         password: {type: string, format: password}
+    ProctorEventInput:
+      type: object
+      required: [eventType, confidence]
+      properties:
+        eventType: {type: string}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        metadata: {type: object, additionalProperties: true}
+    ProctorSignalInput:
+      type: object
+      required: [faceCount, cameraAvailable, tabVisible, fullscreen, networkOnline]
+      properties:
+        attemptId: {type: string, format: uuid}
+        faceCount: {type: integer, minimum: 0, maximum: 10}
+        cameraAvailable: {type: boolean}
+        tabVisible: {type: boolean}
+        fullscreen: {type: boolean}
+        networkOnline: {type: boolean}
+        networkRttMs: {type: integer, minimum: 0}
+        metadata: {type: object, additionalProperties: true}
+    ReviewInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [confirmed, dismissed, needs_followup]}
+        note: {type: string}

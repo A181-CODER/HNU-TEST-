@@ -31,7 +31,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	s := &httpapi.Server{DB: db, Auth: auth.Service{Secret: []byte(secret), AccessTTL: ttl}, Logger: logger, CORS: getenv("CORS_ORIGINS", "http://localhost:5173")}
+	s := &httpapi.Server{DB: db, Auth: auth.Service{Secret: []byte(secret), AccessTTL: ttl}, Logger: logger, CORS: getenv("CORS_ORIGINS", "http://localhost:5173"), Hub: httpapi.NewProctorHub(), ProctoringURL: getenv("PROCTORING_URL", "http://localhost:8000")}
 	if db != nil {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)

@@ -1,6 +1,6 @@
 # API
 
-The API now exposes a real exam lifecycle. Protected endpoints require `Authorization: Bearer <access-token>`. The server owns schedule validation, attempt limits, expiration, answer persistence, randomization, grading and result visibility.
+The API exposes the real exam lifecycle and the Phase 3 realtime proctoring flow. Protected HTTP endpoints require `Authorization: Bearer <access-token>`. The server owns schedule validation, attempt limits, expiration, answer persistence, randomization, grading, result visibility and monitoring risk state.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
@@ -20,13 +20,22 @@ The API now exposes a real exam lifecycle. Protected endpoints require `Authoriz
 | POST/PATCH | `/api/v1/attempts/{id}/answers/{questionId}` | Attempt owner | Validate and autosave an answer |
 | POST | `/api/v1/attempts/{id}/submit` | Attempt owner/instructor | Freeze, grade and generate result transactionally |
 | GET | `/api/v1/attempts/{id}/result` | Owner/instructor | Read result subject to publication policy |
-| POST | `/api/v1/attempts/{id}/proctoring-events` | Attempt owner/proctor | Record a human-reviewable suspicious event |
+| POST | `/api/v1/attempts/{id}/proctoring-events` | Attempt owner/proctor | Persist browser lifecycle event and broadcast it |
+| POST | `/api/v1/attempts/{id}/proctoring-signal` | Attempt owner/proctor | Analyze derived face/camera/tab/fullscreen/network signal through Python |
+| GET | `/api/v1/proctoring/active-attempts` | Proctor/instructor/admin | Live sessions, connection state, face count, risk and open events |
+| GET | `/api/v1/proctoring/attempts/{id}/events` | Proctor/instructor/admin | Recent monitoring events for an attempt |
+| POST | `/api/v1/proctoring/events/{eventId}/review` | Proctor/instructor/admin | Record `confirmed`, `dismissed` or `needs_followup` with a note |
+| GET | `/api/v1/proctoring/ws?token=...` | Proctor/instructor/admin | Authenticated WebSocket event feed |
 | GET | `/api/v1/instructor/exams/{id}/results` | Instructor/admin/proctor | Review exam results |
 | POST | `/api/v1/results/{id}/publish` | Instructor/admin | Publish a result to the student |
 
+## Monitoring event model
+
+Every persisted monitoring event has `eventType`, `severity`, `riskScore`, `confidence`, `source`, `occurredAt`, `reviewStatus` and privacy-conscious `metadata`. The risk score prioritizes human attention; it is not a cheating verdict. Session state also tracks `connectionStatus`, `monitoringStatus`, `lastHeartbeatAt`, `lastSignalAt` and `lastFaceCount`.
+
 ## Lifecycle states
 
-Exams move through `draft`, `published`, `scheduled`, `active`, `ended` and the legacy `closed`/`archived` states. Attempts use `in_progress`, `submitted`, `auto_submitted` and `expired`. The expiration timestamp is persisted on both the attempt and session and is never accepted from the browser.
+Exams move through `draft`, `published`, `scheduled`, `active`, `ended` and the legacy `closed`/`archived` states. Attempts use `in_progress`, `submitted`, `auto_submitted` and `expired`. The expiration timestamp is persisted on the attempt and session and is never accepted from the browser.
 
 ## Request examples
 
@@ -44,6 +53,21 @@ Exams move through `draft`, `published`, `scheduled`, `active`, `ended` and the 
   "allowReview": true,
   "resultVisibility": "not_published",
   "instructions": "Read each question carefully."
+}
+```
+
+A derived proctoring signal uses explicit browser state and face count:
+
+```json
+{
+  "attemptId": "attempt-uuid",
+  "faceCount": 2,
+  "cameraAvailable": true,
+  "tabVisible": true,
+  "fullscreen": true,
+  "networkOnline": true,
+  "networkRttMs": 42,
+  "metadata": {"source": "mediapipe"}
 }
 ```
 
