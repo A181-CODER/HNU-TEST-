@@ -1,0 +1,16 @@
+---
+layout: null
+permalink: /site/
+---
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08111f" />
+    <title>HNU TEST | KING ABDO</title>
+    <script type="module" crossorigin src="/HNU-TEST-/assets/index-DQo6yGM6.js"></script>
+    <link rel="stylesheet" crossorigin href="/HNU-TEST-/assets/index-DMbjjW2Y.css" />
+  </head>
+  <body><div id="root"></div></body>
+</html>
