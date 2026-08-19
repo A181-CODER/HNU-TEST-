@@ -35,12 +35,21 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Build frontend for the repository site
+      - name: Build root and /site/ frontend artifacts
         working-directory: frontend
         env:
-          VITE_BASE_PATH: /HNU-TEST-/
           VITE_API_URL: ''
-        run: npm run build
+        run: |
+          rm -rf ../public dist
+          VITE_BASE_PATH=/HNU-TEST-/ npm run build
+          mkdir -p ../public/assets
+          cp dist/index.html ../public/index.html
+          cp -a dist/assets/. ../public/assets/
+          rm -rf dist
+          VITE_BASE_PATH=/HNU-TEST-/site/ npm run build
+          mkdir -p ../public/site
+          cp -a dist/. ../public/site/
+          touch ../public/.nojekyll
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -48,7 +57,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend/dist
+          path: public
 
       - name: Deploy to GitHub Pages
         id: deployment
