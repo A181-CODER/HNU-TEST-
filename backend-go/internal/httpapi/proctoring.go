@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/A181-CODER/HNU-TEST-/backend-go/internal/auth"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -18,6 +19,8 @@ import (
 type proctorClient struct {
 	conn      *websocket.Conn
 	attemptID string
+	userID    string
+	roles     []string
 	send      chan []byte
 }
 
@@ -48,7 +51,7 @@ func (h *ProctorHub) remove(c *proctorClient) {
 	h.mu.Unlock()
 	_ = c.conn.Close()
 }
-func (h *ProctorHub) Broadcast(attemptID string, payload interface{}) {
+func (h *ProctorHub) Broadcast(attemptID string, payload interface{}, allowed func(string, []string) bool) {
 	data, err := json.Marshal(map[string]interface{}{"type": "proctoring.event", "attemptId": attemptID, "data": payload})
 	if err != nil {
 		return
@@ -57,6 +60,9 @@ func (h *ProctorHub) Broadcast(attemptID string, payload interface{}) {
 	defer h.mu.RUnlock()
 	for c := range h.clients {
 		if c.attemptID != "" && c.attemptID != attemptID {
+			continue
+		}
+		if allowed != nil && !allowed(c.userID, c.roles) {
 			continue
 		}
 		select {
@@ -76,10 +82,20 @@ func (s *Server) proctoringWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "origin not allowed", http.StatusForbidden)
 		return
 	}
+	claims := claimsOf(r)
+	if claims == nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
 	attemptFilter := strings.TrimSpace(r.URL.Query().Get("attemptId"))
 	if attemptFilter != "" {
-		if _, err := uuid.Parse(attemptFilter); err != nil {
+		attemptUUID, err := uuid.Parse(attemptFilter)
+		if err != nil {
 			http.Error(w, "invalid attemptId", http.StatusBadRequest)
+			return
+		}
+		if !s.canAccessAttempt(r.Context(), attemptUUID, claims) {
+			http.Error(w, "attempt scope denied", http.StatusForbidden)
 			return
 		}
 	}
@@ -87,7 +103,7 @@ func (s *Server) proctoringWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	client := &proctorClient{conn: conn, attemptID: attemptFilter, send: make(chan []byte, 32)}
+	client := &proctorClient{conn: conn, attemptID: attemptFilter, userID: claims.UserID, roles: append([]string(nil), claims.Roles...), send: make(chan []byte, 32)}
 	s.Hub.add(client)
 	defer s.Hub.remove(client)
 	go func() {
@@ -207,7 +223,9 @@ func (s *Server) recordProctoringEvent(ctx context.Context, attemptID uuid.UUID,
 	}
 	view = proctorEventView{ID: id.String(), AttemptID: attemptID.String(), StudentName: studentName, ExamTitle: examTitle, EventType: input.EventType, Severity: severity, RiskScore: risk, Confidence: input.Confidence, Source: source, OccurredAt: time.Now().UTC(), ReviewStatus: "open", Metadata: input.Metadata}
 	if s.Hub != nil {
-		s.Hub.Broadcast(attemptID.String(), view)
+		s.Hub.Broadcast(attemptID.String(), view, func(userID string, roles []string) bool {
+			return s.canAccessAttempt(ctx, attemptID, &auth.Claims{UserID: userID, Roles: roles})
+		})
 	}
 	return view, nil
 }
@@ -316,7 +334,7 @@ func (s *Server) allowedOrigin(origin string) bool {
 }
 
 func (s *Server) activeProctoring(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT a.id,u.display_name,e.title,a.status,ps.connection_status,ps.monitoring_status,ps.risk_score,ps.last_face_count,COALESCE(COUNT(pe.id) FILTER(WHERE pe.review_status='open'),0),COALESCE(MAX(pe.occurred_at),a.started_at),a.started_at,a.expires_at FROM exam_attempts a JOIN exam_sessions es ON es.id=a.session_id JOIN users u ON u.id=es.student_id JOIN exams e ON e.id=es.exam_id JOIN proctoring_sessions ps ON ps.attempt_id=a.id LEFT JOIN proctoring_events pe ON pe.proctoring_session_id=ps.id WHERE a.status='in_progress' GROUP BY a.id,u.display_name,e.title,a.status,ps.connection_status,ps.monitoring_status,ps.risk_score,ps.last_face_count,ps.last_signal_at,ps.last_heartbeat_at,a.started_at,a.expires_at ORDER BY ps.risk_score DESC,a.started_at ASC`)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT a.id,u.display_name,e.title,a.status,ps.connection_status,ps.monitoring_status,ps.risk_score,ps.last_face_count,COALESCE(COUNT(pe.id) FILTER(WHERE pe.review_status='open'),0),COALESCE(MAX(pe.occurred_at),a.started_at),a.started_at,a.expires_at FROM exam_attempts a JOIN exam_sessions es ON es.id=a.session_id JOIN users u ON u.id=es.student_id JOIN exams e ON e.id=es.exam_id JOIN proctoring_sessions ps ON ps.attempt_id=a.id LEFT JOIN proctoring_events pe ON pe.proctoring_session_id=ps.id WHERE a.status='in_progress' AND ($2 OR (($3 AND EXISTS(SELECT 1 FROM exam_proctors ep WHERE ep.exam_id=es.exam_id AND ep.proctor_id=$1)) OR (NOT $3 AND EXISTS(SELECT 1 FROM resource_memberships rm JOIN courses co2 ON co2.id=e.course_id JOIN departments d2 ON d2.id=co2.department_id JOIN faculties f2 ON f2.id=d2.faculty_id WHERE rm.user_id=$1 AND (rm.course_id=co2.id OR rm.department_id=d2.id OR rm.faculty_id=f2.id OR rm.university_id=f2.university_id))))) GROUP BY a.id,u.display_name,e.title,a.status,ps.connection_status,ps.monitoring_status,ps.risk_score,ps.last_face_count,ps.last_signal_at,ps.last_heartbeat_at,a.started_at,a.expires_at ORDER BY ps.risk_score DESC,a.started_at ASC`, claimsOf(r).UserID, hasRole(claimsOf(r), "super_admin"), hasRole(claimsOf(r), "proctor"))
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not load active monitoring"})
 		return
@@ -339,6 +357,10 @@ func (s *Server) proctoringEvents(w http.ResponseWriter, r *http.Request) {
 	attemptID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		write(w, 400, map[string]string{"error": "invalid attempt id"})
+		return
+	}
+	if !s.canAccessAttempt(r.Context(), attemptID, claimsOf(r)) {
+		write(w, 403, map[string]string{"error": "attempt scope denied"})
 		return
 	}
 	rows, err := s.DB.QueryContext(r.Context(), `SELECT pe.id,a.id,u.display_name,e.title,pe.event_type,pe.severity,pe.risk_score,pe.confidence,pe.source,pe.occurred_at,pe.review_status,pe.metadata FROM proctoring_events pe JOIN proctoring_sessions ps ON ps.id=pe.proctoring_session_id JOIN exam_attempts a ON a.id=ps.attempt_id JOIN exam_sessions es ON es.id=a.session_id JOIN users u ON u.id=es.student_id JOIN exams e ON e.id=es.exam_id WHERE a.id=$1 ORDER BY pe.occurred_at DESC LIMIT 200`, attemptID)
@@ -374,6 +396,11 @@ func (s *Server) reviewProctoringEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
+	var attemptID uuid.UUID
+	if err := s.DB.QueryRowContext(r.Context(), `SELECT a.id FROM proctoring_events pe JOIN proctoring_sessions ps ON ps.id=pe.proctoring_session_id JOIN exam_attempts a ON a.id=ps.attempt_id WHERE pe.id=$1`, id).Scan(&attemptID); err != nil || !s.canAccessAttempt(r.Context(), attemptID, c) {
+		write(w, 403, map[string]string{"error": "event scope denied"})
+		return
+	}
 	res, err := s.DB.ExecContext(r.Context(), `UPDATE proctoring_events SET review_status=$1,reviewed_at=now(),reviewed_by=$2,reviewer_note=$3 WHERE id=$4`, in.Decision, c.UserID, in.Note, id)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not review event"})

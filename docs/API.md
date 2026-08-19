@@ -83,3 +83,20 @@ An answer is persisted as logical option identities, not display positions:
 ```
 
 OpenAPI is maintained in `docs/openapi.yaml`. The OpenAPI file documents the stable public surface; update it whenever a new route or request schema is introduced.
+
+## Phase 4 organization and resource scope
+
+The organization surface models `University → Faculty → Department → Course`. The backend resolves inherited scope from any assigned resource level, so a course membership grants visibility of its parent department, faculty and university in the directory without granting access to sibling resources.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/organization/tree` | Authenticated | Return only the university hierarchy visible to the caller, including course instructors and students |
+| GET | `/api/v1/organization/overview` | Super admin/university admin/instructor/proctor | Return counts for resources within the caller's allowed scope |
+| POST | `/api/v1/organization/assignments` | Super admin/university admin | Assign a user to a university/faculty/department/course scope as `university_admin`, `instructor` or `proctor` |
+| POST | `/api/v1/courses/{id}/students` | Scoped admin/instructor | Enroll a student in a course the caller manages |
+| POST | `/api/v1/courses/{id}/instructors` | Scoped admin/instructor | Assign an instructor to a course the caller manages |
+| POST | `/api/v1/exams/{id}/proctors` | Scoped admin/instructor | Assign a proctor directly to an exam |
+
+Resource checks are enforced on the backend. Exam creation resolves `courseId` or the legacy `courseCode` and rejects a caller without course scope. Exam reads, draft mutation, publishing, scheduling, result review/publication, attempt access and proctoring access all resolve the exam's course and apply the same scope rules. Students additionally require a `course_students` enrollment, while proctors require a direct `exam_proctors` assignment for an exam or attempt.
+
+The organization dashboard consumes `/organization/tree` and `/organization/overview`; it is not the security boundary. A hidden navigation item does not grant access, and a forged resource identifier is rejected by the backend with `403`.

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: HNU TEST API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
 paths:
@@ -19,13 +19,67 @@ paths:
     get:
       security: [{bearerAuth: []}]
       responses: {'200': {description: Identity}, '401': {description: Unauthorized}}
+  /api/v1/organization/tree:
+    get:
+      security: [{bearerAuth: []}]
+      description: Returns only the hierarchy visible to the authenticated caller through inherited resource scope.
+      responses: {'200': {description: Scoped university hierarchy}, '403': {description: Forbidden}}
+  /api/v1/organization/overview:
+    get:
+      security: [{bearerAuth: []}]
+      description: Returns counts within the caller's institutional scope.
+      responses: {'200': {description: Scoped organization counts}, '403': {description: Forbidden}}
+  /api/v1/organization/assignments:
+    post:
+      security: [{bearerAuth: []}]
+      description: Assign a university_admin, instructor or proctor to a resource scope.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResourceAssignmentInput'}}}
+      responses: {'201': {description: Scope assigned}, '400': {description: Invalid assignment}, '403': {description: Administration scope required}}
+  /api/v1/courses/{id}/students:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UserAssignmentInput'}}}
+      responses: {'201': {description: Student enrolled}, '403': {description: Course scope denied}}
+  /api/v1/courses/{id}/instructors:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UserAssignmentInput'}}}
+      responses: {'201': {description: Instructor assigned}, '403': {description: Course scope denied}}
   /api/v1/exams:
     get:
       security: [{bearerAuth: []}]
-      responses: {'200': {description: Exams}}
+      responses: {'200': {description: Scoped exams}}
     post:
       security: [{bearerAuth: []}]
-      responses: {'201': {description: Draft created}, '403': {description: Forbidden}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExamCreateInput'}}}
+      responses: {'201': {description: Draft created}, '403': {description: Course scope denied}}
+  /api/v1/exams/{id}:
+    get:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Exam}, '403': {description: Exam scope denied}}
+    patch:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Draft updated}, '403': {description: Exam scope denied}}
+  /api/v1/exams/{id}/proctors:
+    post:
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UserAssignmentInput'}}}
+      responses: {'201': {description: Proctor assigned}, '403': {description: Exam scope denied}}
   /api/v1/attempts/{id}/proctoring-events:
     post:
       security: [{bearerAuth: []}]
@@ -33,7 +87,7 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ProctorEventInput'}}}
-      responses: {'201': {description: Event recorded}, '403': {description: Forbidden}}
+      responses: {'201': {description: Event recorded}, '403': {description: Attempt scope denied}}
   /api/v1/attempts/{id}/proctoring-signal:
     post:
       security: [{bearerAuth: []}]
@@ -41,16 +95,16 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ProctorSignalInput'}}}
-      responses: {'201': {description: Analyzed event}, '200': {description: Heartbeat/no suspicious event}, '503': {description: Analyzer unavailable}}
+      responses: {'201': {description: Analyzed event}, '200': {description: Heartbeat/no suspicious event}, '403': {description: Attempt scope denied}, '503': {description: Analyzer unavailable}}
   /api/v1/proctoring/active-attempts:
     get:
       security: [{bearerAuth: []}]
-      responses: {'200': {description: Active monitoring sessions}}
+      responses: {'200': {description: Scoped active monitoring sessions}}
   /api/v1/proctoring/attempts/{id}/events:
     get:
       security: [{bearerAuth: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses: {'200': {description: Recent events}}
+      responses: {'200': {description: Scoped recent events}, '403': {description: Attempt scope denied}}
   /api/v1/proctoring/events/{eventId}/review:
     post:
       security: [{bearerAuth: []}]
@@ -58,12 +112,14 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/ReviewInput'}}}
-      responses: {'200': {description: Review saved}, '404': {description: Event not found}}
+      responses: {'200': {description: Review saved}, '403': {description: Event scope denied}}
   /api/v1/proctoring/ws:
     get:
-      description: WebSocket upgrade endpoint. Pass a short-lived JWT in the token query parameter because browsers cannot set Authorization during the initial handshake.
-      parameters: [{name: token, in: query, required: true, schema: {type: string}}]
-      responses: {'101': {description: Switching Protocols}}
+      description: WebSocket upgrade endpoint. Pass a short-lived JWT in the token query parameter. An optional attemptId is checked against the caller's resource scope.
+      parameters:
+        - {name: token, in: query, required: true, schema: {type: string}}
+        - {name: attemptId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses: {'101': {description: Switching Protocols}, '403': {description: Attempt scope denied}}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -74,6 +130,32 @@ components:
       properties:
         email: {type: string, format: email}
         password: {type: string, format: password}
+    ExamCreateInput:
+      type: object
+      required: [title, durationMinutes]
+      properties:
+        courseId: {type: string, format: uuid}
+        courseCode: {type: string}
+        title: {type: string}
+        durationMinutes: {type: integer, minimum: 1, maximum: 1440}
+        attemptLimit: {type: integer, minimum: 1, maximum: 20}
+        passingScore: {type: number}
+        totalMarks: {type: number}
+    ResourceAssignmentInput:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: {type: string, format: uuid}
+        role: {type: string, enum: [university_admin, instructor, proctor]}
+        universityId: {type: string, format: uuid}
+        facultyId: {type: string, format: uuid}
+        departmentId: {type: string, format: uuid}
+        courseId: {type: string, format: uuid}
+    UserAssignmentInput:
+      type: object
+      required: [userId]
+      properties:
+        userId: {type: string, format: uuid}
     ProctorEventInput:
       type: object
       required: [eventType, confidence]

@@ -31,6 +31,7 @@ def main():
 
     exam = call("POST", "/exams", instructor, json={"title": "Phase 3 Proctoring E2E", "courseCode": "SWE-201", "durationMinutes": 30, "attemptLimit": 1, "passingScore": 60, "totalMarks": 2, "negativeMarking": 0.5, "randomizeQuestions": True, "randomizeOptions": True, "allowReview": True, "resultVisibility": "not_published", "instructions": "Phase 3 acceptance"})
     exam_id = exam["id"]
+    call("POST", f"/exams/{exam_id}/proctors", instructor, json={"userId": "00000000-0000-0000-0000-000000000003"})
     call("POST", f"/exams/{exam_id}/questions", instructor, json={"questionId": "60000000-0000-0000-0000-000000000001", "position": 1, "points": 2})
     call("POST", f"/exams/{exam_id}/publish", instructor)
     now = datetime.now(timezone.utc)

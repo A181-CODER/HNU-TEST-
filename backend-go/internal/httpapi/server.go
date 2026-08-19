@@ -97,6 +97,7 @@ type resultResponse struct {
 }
 
 type createExamRequest struct {
+	CourseID           string     `json:"courseId"`
 	Title              string     `json:"title"`
 	Description        string     `json:"description"`
 	CourseCode         string     `json:"courseCode"`
@@ -144,6 +145,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ready", s.ready)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.Handle("GET /api/v1/me", s.requireRole(http.HandlerFunc(s.me)))
+	mux.Handle("GET /api/v1/organization/tree", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor", "student"})(http.HandlerFunc(s.organizationTree)))
+	mux.Handle("GET /api/v1/organization/overview", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.organizationOverview)))
+	mux.Handle("POST /api/v1/organization/assignments", s.requireAnyRole([]string{"super_admin", "university_admin"})(http.HandlerFunc(s.organizationAssignments)))
+	mux.Handle("POST /api/v1/courses/{id}/students", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.enrollCourseStudent)))
+	mux.Handle("POST /api/v1/courses/{id}/instructors", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.assignCourseInstructor)))
+	mux.Handle("POST /api/v1/exams/{id}/proctors", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.assignExamProctor)))
 	mux.Handle("GET /api/v1/exams", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.exams)))
 	mux.Handle("POST /api/v1/exams", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.createExam)))
 	mux.Handle("GET /api/v1/exams/{id}", s.requireRole(http.HandlerFunc(s.examDetails)))
@@ -280,7 +287,8 @@ func (s *Server) exams(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusOK, []interface{}{})
 		return
 	}
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id,title,course_code,status,start_at,end_at,duration_minutes,attempt_limit,passing_score,total_marks,randomize_questions,randomize_options FROM exams WHERE deleted_at IS NULL ORDER BY start_at NULLS LAST,created_at DESC`)
+	c := claimsOf(r)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT e.id,e.title,e.course_code,e.status,e.start_at,e.end_at,e.duration_minutes,e.attempt_limit,e.passing_score,e.total_marks,e.randomize_questions,e.randomize_options FROM exams e LEFT JOIN courses co ON co.id=e.course_id LEFT JOIN departments d ON d.id=co.department_id LEFT JOIN faculties f ON f.id=d.faculty_id WHERE e.deleted_at IS NULL AND ($2 OR EXISTS(SELECT 1 FROM resource_memberships rm WHERE rm.user_id=$1 AND (rm.course_id=co.id OR rm.department_id=d.id OR rm.faculty_id=f.id OR rm.university_id=f.university_id))) ORDER BY e.start_at NULLS LAST,e.created_at DESC`, c.UserID, hasRole(c, "super_admin"))
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not load exams"})
 		return
@@ -313,6 +321,21 @@ func (s *Server) createExam(w http.ResponseWriter, r *http.Request) {
 		write(w, 503, map[string]string{"error": "database is not configured"})
 		return
 	}
+	var courseID uuid.UUID
+	var err error
+	if strings.TrimSpace(in.CourseID) != "" {
+		courseID, err = uuid.Parse(in.CourseID)
+	} else {
+		err = s.DB.QueryRowContext(r.Context(), `SELECT id FROM courses WHERE code=$1`, in.CourseCode).Scan(&courseID)
+	}
+	if err != nil || courseID == uuid.Nil {
+		write(w, 400, map[string]string{"error": "a valid courseId or courseCode is required"})
+		return
+	}
+	if !s.canManageCourse(r.Context(), c, courseID) {
+		write(w, 403, map[string]string{"error": "course scope denied"})
+		return
+	}
 	id := uuid.New()
 	limit := in.AttemptLimit
 	if limit == 0 {
@@ -322,7 +345,7 @@ func (s *Server) createExam(w http.ResponseWriter, r *http.Request) {
 	if visibility == "" {
 		visibility = "not_published"
 	}
-	_, err := s.DB.ExecContext(r.Context(), `INSERT INTO exams(id,created_by,title,description,course_code,duration_minutes,start_at,end_at,attempt_limit,passing_score,total_marks,negative_marking,randomize_questions,randomize_options,allow_review,result_visibility,instructions,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'draft')`, id, c.UserID, in.Title, in.Description, in.CourseCode, in.DurationMinutes, in.StartAt, in.EndAt, limit, in.PassingScore, in.TotalMarks, in.NegativeMarking, in.RandomizeQuestions, in.RandomizeOptions, in.AllowReview, visibility, in.Instructions)
+	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO exams(id,created_by,course_id,title,description,course_code,duration_minutes,start_at,end_at,attempt_limit,passing_score,total_marks,negative_marking,randomize_questions,randomize_options,allow_review,result_visibility,instructions,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'draft')`, id, c.UserID, courseID, in.Title, in.Description, in.CourseCode, in.DurationMinutes, in.StartAt, in.EndAt, limit, in.PassingScore, in.TotalMarks, in.NegativeMarking, in.RandomizeQuestions, in.RandomizeOptions, in.AllowReview, visibility, in.Instructions)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not create exam"})
 		return
@@ -349,7 +372,11 @@ func (s *Server) updateExam(w http.ResponseWriter, r *http.Request) {
 		write(w, 503, map[string]string{"error": "database is not configured"})
 		return
 	}
-	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET title=$1,description=$2,course_code=$3,duration_minutes=$4,start_at=$5,end_at=$6,attempt_limit=$7,passing_score=$8,total_marks=$9,negative_marking=$10,randomize_questions=$11,randomize_options=$12,allow_review=$13,result_visibility=$14,instructions=$15,updated_at=now() WHERE id=$16 AND created_by=$17 AND status='draft' AND deleted_at IS NULL`, in.Title, in.Description, in.CourseCode, in.DurationMinutes, in.StartAt, in.EndAt, max(in.AttemptLimit, 1), in.PassingScore, in.TotalMarks, in.NegativeMarking, in.RandomizeQuestions, in.RandomizeOptions, in.AllowReview, defaultVisibility(in.ResultVisibility), in.Instructions, id, c.UserID)
+	if !s.canManageExam(r.Context(), c, id) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
+		return
+	}
+	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET title=$1,description=$2,course_code=$3,duration_minutes=$4,start_at=$5,end_at=$6,attempt_limit=$7,passing_score=$8,total_marks=$9,negative_marking=$10,randomize_questions=$11,randomize_options=$12,allow_review=$13,result_visibility=$14,instructions=$15,updated_at=now() WHERE id=$16 AND status='draft' AND deleted_at IS NULL`, in.Title, in.Description, in.CourseCode, in.DurationMinutes, in.StartAt, in.EndAt, max(in.AttemptLimit, 1), in.PassingScore, in.TotalMarks, in.NegativeMarking, in.RandomizeQuestions, in.RandomizeOptions, in.AllowReview, defaultVisibility(in.ResultVisibility), in.Instructions, id)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not update exam"})
 		return
@@ -368,7 +395,11 @@ func (s *Server) publishExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
-	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET status='published',published_at=now(),updated_at=now() WHERE id=$1 AND created_by=$2 AND status='draft' AND EXISTS(SELECT 1 FROM exam_questions WHERE exam_id=$1)`, id, c.UserID)
+	if !s.canManageExam(r.Context(), c, id) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
+		return
+	}
+	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET status='published',published_at=now(),updated_at=now() WHERE id=$1 AND status='draft' AND EXISTS(SELECT 1 FROM exam_questions WHERE exam_id=$1)`, id)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not publish exam"})
 		return
@@ -396,7 +427,11 @@ func (s *Server) scheduleExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
-	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET status='scheduled',start_at=$1,end_at=$2,updated_at=now() WHERE id=$3 AND created_by=$4 AND status IN ('published','scheduled')`, in.StartAt, in.EndAt, id, c.UserID)
+	if !s.canManageExam(r.Context(), c, id) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
+		return
+	}
+	res, err := s.DB.ExecContext(r.Context(), `UPDATE exams SET status='scheduled',start_at=$1,end_at=$2,updated_at=now() WHERE id=$3 AND status IN ('published','scheduled')`, in.StartAt, in.EndAt, id)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not schedule exam"})
 		return
@@ -414,6 +449,10 @@ func (s *Server) examDetails(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(r.PathValue("id"))
 	if err != nil {
 		write(w, 400, map[string]string{"error": "invalid exam id"})
+		return
+	}
+	if !s.canAccessExam(r.Context(), claimsOf(r), id) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
 		return
 	}
 	var title, course, status, instructions string
@@ -508,10 +547,14 @@ func (s *Server) attachQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
+	if !s.canManageExam(r.Context(), c, examID) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
+		return
+	}
 	if in.Position < 1 {
 		in.Position = 1
 	}
-	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO exam_questions(exam_id,question_id,position,points) SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM exams WHERE id=$1 AND created_by=$5 AND status='draft') ON CONFLICT(exam_id,question_id) DO UPDATE SET position=EXCLUDED.position,points=EXCLUDED.points`, examID, qid, in.Position, in.Points, c.UserID)
+	_, err = s.DB.ExecContext(r.Context(), `INSERT INTO exam_questions(exam_id,question_id,position,points) SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM exams WHERE id=$1 AND status='draft') ON CONFLICT(exam_id,question_id) DO UPDATE SET position=EXCLUDED.position,points=EXCLUDED.points`, examID, qid, in.Position, in.Points)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not attach question"})
 		return
@@ -521,7 +564,7 @@ func (s *Server) attachQuestion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) studentExams(w http.ResponseWriter, r *http.Request) {
 	c := claimsOf(r)
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT e.id,e.title,e.course_code,e.status,e.start_at,e.end_at,e.duration_minutes,e.attempt_limit,COUNT(a.id),COUNT(a.id) FILTER(WHERE a.status IN ('submitted','auto_submitted','expired')) FROM exams e LEFT JOIN exam_sessions es ON es.exam_id=e.id AND es.student_id=$1 LEFT JOIN exam_attempts a ON a.session_id=es.id WHERE e.deleted_at IS NULL AND e.status IN ('published','scheduled','active','ended') GROUP BY e.id ORDER BY e.start_at NULLS LAST`, c.UserID)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT e.id,e.title,e.course_code,e.status,e.start_at,e.end_at,e.duration_minutes,e.attempt_limit,COUNT(a.id),COUNT(a.id) FILTER(WHERE a.status IN ('submitted','auto_submitted','expired')) FROM exams e JOIN course_students cs ON cs.course_id=e.course_id AND cs.student_id=$1 LEFT JOIN exam_sessions es ON es.exam_id=e.id AND es.student_id=$1 LEFT JOIN exam_attempts a ON a.session_id=es.id WHERE e.deleted_at IS NULL AND e.status IN ('published','scheduled','active','ended') GROUP BY e.id ORDER BY e.start_at NULLS LAST`, c.UserID)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not load student exams"})
 		return
@@ -558,6 +601,10 @@ func (s *Server) startExam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	student := claimsOf(r)
+	if !s.canAccessExam(r.Context(), student, examID) {
+		write(w, 403, map[string]string{"error": "student is not enrolled in this course"})
+		return
+	}
 	tx, err := s.DB.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not start transaction"})
@@ -769,9 +816,12 @@ func (s *Server) submitAttempt(w http.ResponseWriter, r *http.Request) {
 		write(w, 404, map[string]string{"error": "attempt not found"})
 		return
 	}
-	if studentID != c.UserID && !auth.HasRole(c.Roles, "instructor", "university_admin", "super_admin") {
-		write(w, 403, map[string]string{"error": "attempt access denied"})
-		return
+	if studentID != c.UserID {
+		examID, examErr := s.attemptExam(r.Context(), attemptID)
+		if examErr != nil || !s.canManageExam(r.Context(), c, examID) {
+			write(w, 403, map[string]string{"error": "attempt access denied"})
+			return
+		}
 	}
 	if status == "submitted" || status == "auto_submitted" || status == "expired" {
 		res, err := s.resultForAttemptTx(r.Context(), tx, attemptID)
@@ -808,12 +858,16 @@ func (s *Server) attemptResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
+	if !s.canAccessAttempt(r.Context(), attemptID, c) {
+		write(w, 403, map[string]string{"error": "result access denied"})
+		return
+	}
 	res, err := s.resultForAttempt(r.Context(), attemptID)
 	if err != nil {
 		write(w, 404, map[string]string{"error": "result not found"})
 		return
 	}
-	if c.UserID != s.attemptStudent(r.Context(), attemptID) && !auth.HasRole(c.Roles, "instructor", "university_admin", "super_admin") {
+	if c.UserID != s.attemptStudent(r.Context(), attemptID) && !s.canAccessAttempt(r.Context(), attemptID, c) {
 		write(w, 403, map[string]string{"error": "result access denied"})
 		return
 	}
@@ -827,6 +881,11 @@ func (s *Server) instructorResults(w http.ResponseWriter, r *http.Request) {
 	examID, err := parseUUID(r.PathValue("id"))
 	if err != nil {
 		write(w, 400, map[string]string{"error": "invalid exam id"})
+		return
+	}
+	c := claimsOf(r)
+	if !s.canAccessExam(r.Context(), c, examID) {
+		write(w, 403, map[string]string{"error": "exam scope denied"})
 		return
 	}
 	rows, err := s.DB.QueryContext(r.Context(), `SELECT re.id,re.attempt_id,e.title,re.score,re.maximum,re.percentage,re.grade,re.correct_count,re.incorrect_count,re.unanswered_count,re.duration_seconds,re.published_at,a.submitted_at FROM results re JOIN exam_attempts a ON a.id=re.attempt_id JOIN exam_sessions es ON es.id=a.session_id JOIN exams e ON e.id=es.exam_id WHERE e.id=$1 ORDER BY a.submitted_at DESC`, examID)
@@ -854,7 +913,12 @@ func (s *Server) publishResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := claimsOf(r)
-	res, err := s.DB.ExecContext(r.Context(), `UPDATE results re SET published_at=now() FROM exam_attempts a JOIN exam_sessions es ON es.id=a.session_id JOIN exams e ON e.id=es.exam_id WHERE re.id=$1 AND e.created_by=$2`, id, c.UserID)
+	var examID uuid.UUID
+	if err := s.DB.QueryRowContext(r.Context(), `SELECT es.exam_id FROM results re JOIN exam_attempts a ON a.id=re.attempt_id JOIN exam_sessions es ON es.id=a.session_id WHERE re.id=$1`, id).Scan(&examID); err != nil || !s.canManageExam(r.Context(), c, examID) {
+		write(w, 403, map[string]string{"error": "result scope denied"})
+		return
+	}
+	res, err := s.DB.ExecContext(r.Context(), `UPDATE results SET published_at=now() WHERE id=$1`, id)
 	if err != nil {
 		write(w, 500, map[string]string{"error": "could not publish result"})
 		return
@@ -1110,16 +1174,6 @@ func (s *Server) AutoSubmitExpired(ctx context.Context) {
 	}
 }
 
-func (s *Server) canAccessAttempt(ctx context.Context, id uuid.UUID, c *auth.Claims) bool {
-	if auth.HasRole(c.Roles, "instructor", "university_admin", "super_admin", "proctor") {
-		return true
-	}
-	var student string
-	if s.DB.QueryRowContext(ctx, `SELECT es.student_id FROM exam_attempts a JOIN exam_sessions es ON es.id=a.session_id WHERE a.id=$1`, id).Scan(&student) != nil {
-		return false
-	}
-	return student == c.UserID
-}
 func (s *Server) attemptStudent(ctx context.Context, id uuid.UUID) string {
 	var student string
 	_ = s.DB.QueryRowContext(ctx, `SELECT es.student_id FROM exam_attempts a JOIN exam_sessions es ON es.id=a.session_id WHERE a.id=$1`, id).Scan(&student)
