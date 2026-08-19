@@ -3,6 +3,10 @@
 .env.production
 .env.*.local
 /backups/
+# Real student-code imports are deployment-local and must never be committed.
+/student_codes.txt
+/private/
+/imports/
 .venv/
 __pycache__/
 node_modules/

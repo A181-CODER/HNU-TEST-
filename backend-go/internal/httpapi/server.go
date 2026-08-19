@@ -148,6 +148,7 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /api/v1/organization/tree", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor", "student"})(http.HandlerFunc(s.organizationTree)))
 	mux.Handle("GET /api/v1/organization/overview", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor", "proctor"})(http.HandlerFunc(s.organizationOverview)))
 	mux.Handle("POST /api/v1/organization/assignments", s.requireAnyRole([]string{"super_admin", "university_admin"})(http.HandlerFunc(s.organizationAssignments)))
+	mux.Handle("POST /api/v1/organization/student-identities/link", s.requireAnyRole([]string{"super_admin", "university_admin"})(http.HandlerFunc(s.linkStudentCode)))
 	mux.Handle("POST /api/v1/courses/{id}/students", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.enrollCourseStudent)))
 	mux.Handle("POST /api/v1/courses/{id}/instructors", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.assignCourseInstructor)))
 	mux.Handle("POST /api/v1/exams/{id}/proctors", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.assignExamProctor)))
@@ -160,6 +161,8 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /api/v1/exams/{id}/questions", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.attachQuestion)))
 	mux.Handle("GET /api/v1/questions", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.questions)))
 	mux.Handle("POST /api/v1/questions", s.requireAnyRole([]string{"super_admin", "university_admin", "instructor"})(http.HandlerFunc(s.createQuestion)))
+	mux.Handle("GET /api/v1/student/identity", s.requireAnyRole([]string{"student"})(http.HandlerFunc(s.studentIdentity)))
+	mux.Handle("POST /api/v1/student/verify-code", s.requireAnyRole([]string{"student"})(http.HandlerFunc(s.verifyStudentCode)))
 	mux.Handle("GET /api/v1/student/exams", s.requireAnyRole([]string{"student"})(http.HandlerFunc(s.studentExams)))
 	mux.Handle("POST /api/v1/exams/{id}/start", s.requireAnyRole([]string{"student"})(http.HandlerFunc(s.startExam)))
 	mux.Handle("GET /api/v1/attempts/{id}", s.requireRole(http.HandlerFunc(s.getAttempt)))
@@ -603,6 +606,10 @@ func (s *Server) startExam(w http.ResponseWriter, r *http.Request) {
 	student := claimsOf(r)
 	if !s.canAccessExam(r.Context(), student, examID) {
 		write(w, 403, map[string]string{"error": "student is not enrolled in this course"})
+		return
+	}
+	if !s.studentIdentityLinked(r.Context(), student.UserID) {
+		write(w, http.StatusForbidden, map[string]string{"error": "student identity must be linked and verified before starting an exam"})
 		return
 	}
 	tx, err := s.DB.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
