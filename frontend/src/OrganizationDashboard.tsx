@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BookOpen, Building2, ChevronDown, ChevronRight, GraduationCap, Layers3, LogIn, ShieldCheck, Users, X } from 'lucide-react';
 
-const API=import.meta.env.VITE_API_URL||'http://localhost:8080/api/v1';
+const API=import.meta.env.VITE_API_URL??'http://localhost:8080/api/v1';
 function headers(){return {Authorization:`Bearer ${localStorage.getItem('hnu_access_token')||''}`,'Content-Type':'application/json'}}
 function api(path:string,init:RequestInit={}){return fetch(`${API}${path}`,{...init,headers:{...headers(),...(init.headers||{})}})}
 type Course={id:string;code:string;title:string;credits:number;instructors:{id:string;name:string;email:string}[];students:{id:string;name:string;email:string}[]};type Department={id:string;name:string;code:string;courses:Course[]};type Faculty={id:string;name:string;code:string;departments:Department[]};type University={id:string;name:string;code:string;facultyCount:number;faculties:Faculty[]};type Tree={universities:University[];viewer:{userId:string;roles:string[]}};type Overview=Record<string,number>;

@@ -5,11 +5,11 @@ import OrganizationDashboard from './OrganizationDashboard';
 import { Activity, AlertTriangle, ArrowLeft, BookOpen, Camera, CheckCircle2, ChevronDown, Clock3, FileCheck2, GraduationCap, LayoutDashboard, Languages, Menu, Moon, Plus, Search, ShieldCheck, Sun, Users, X } from 'lucide-react';
 
 type Exam = { id:string; title:string; courseCode:string; status:string; durationMinutes:number; startAt:string; endAt:string };
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api/v1';
 const demoExams: Exam[] = [{id:'demo-1',title:'أساسيات هندسة البرمجيات',courseCode:'SWE-201',status:'scheduled',durationMinutes:90,startAt:'2026-08-20T10:00:00Z',endAt:'2026-08-20T11:30:00Z'},{id:'demo-2',title:'قواعد البيانات المتقدمة',courseCode:'DB-302',status:'draft',durationMinutes:120,startAt:'',endAt:''}];
 function App(){const [dark,setDark]=useState(true);const [arabic,setArabic]=useState(true);const [active,setActive]=useState('overview');const [exams,setExams]=useState<Exam[]>(demoExams);const [menu,setMenu]=useState(false);const [showCreate,setShowCreate]=useState(false);const [query,setQuery]=useState('');const [studentMode,setStudentMode]=useState(false);
  useEffect(()=>{document.documentElement.dir=arabic?'rtl':'ltr';document.documentElement.lang=arabic?'ar':'en';},[arabic]);
- useEffect(()=>{fetch(`${API}/exams`).then(r=>r.ok?r.json():[]).then(data=>Array.isArray(data)&&data.length&&setExams(data)).catch(()=>{});},[]);
+ useEffect(()=>{if(!API)return;fetch(`${API}/exams`).then(r=>r.ok?r.json():[]).then(data=>Array.isArray(data)&&data.length&&setExams(data)).catch(()=>{});},[]);
  const t=(ar:string,en:string)=>arabic?ar:en; const filtered=useMemo(()=>exams.filter(e=>`${e.title} ${e.courseCode}`.toLowerCase().includes(query.toLowerCase())),[exams,query]);
  if(studentMode)return <StudentPortal arabic={arabic} onExit={()=>setStudentMode(false)}/>;
  if(active==='security')return <ProctorDashboard arabic={arabic} onExit={()=>setActive('overview')}/>;

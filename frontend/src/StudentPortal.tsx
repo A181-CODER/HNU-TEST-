@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, Clock3, Cloud, CloudOff, FileCheck2, Eye, LockKeyhole, LogIn, Maximize2, Minimize2, Radio, RefreshCw, Send, ShieldCheck, Wifi, WifiOff, X } from 'lucide-react';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api/v1';
 type Exam = { id:string; title:string; courseCode:string; status:string; durationMinutes:number; startAt:string|null; endAt:string|null; remainingAttempts:number; attempts:number };
 type Question = { id:string; position:number; type:string; prompt:string; points:number; options?:{key:string;text:string}[] };
 type Answer = { questionId:string; values:string[]; textAnswer:string; markedForReview:boolean };

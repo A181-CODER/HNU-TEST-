@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Check, ChevronLeft, Circle, Clock3, Eye, LogIn, Radio, RefreshCw, ShieldAlert, ShieldCheck, Wifi, WifiOff, X } from 'lucide-react';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api/v1';
 type ActiveAttempt = { attemptId:string; studentName:string; examTitle:string; attemptStatus:string; connectionStatus:string; monitoringStatus:string; riskScore:number; faceCount:number; openEvents:number; lastEventAt:string; startedAt:string; expiresAt:string };
 type EventView = { id:string; attemptId:string; studentName:string; examTitle:string; eventType:string; severity:string; riskScore:number; confidence:number; source:string; occurredAt:string; reviewStatus:string; metadata:Record<string,unknown> };
 

@@ -36,6 +36,10 @@ The repository includes a production-oriented `docker-compose.prod.yml` with Cad
 
 Start from [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md), copy `deploy/.env.production.example` to the untracked `deploy/.env.production`, fill in a real domain and generated secrets, then run `./deploy/deploy.sh`. Backup and guarded restore scripts are available under `deploy/`.
 
+### GitHub Pages frontend preview
+
+The frontend is also published automatically at [a181-coder.github.io/HNU-TEST-](https://a181-coder.github.io/HNU-TEST-/) through GitHub Actions. This public Pages site is a static demonstration of the KING ABDO interface and uses demo data when no API URL is configured. The complete authenticated examination flow, PostgreSQL persistence, camera event capture, Python analysis and realtime WebSocket proctoring require the VPS deployment described above.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
