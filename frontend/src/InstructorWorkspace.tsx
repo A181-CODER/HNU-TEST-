@@ -15,7 +15,7 @@ export default function InstructorWorkspace({ arabic, onExit }:{ arabic:boolean;
   const t=(ar:string,en:string)=>arabic?ar:en;
   const [authed,setAuthed]=useState(Boolean(token()));
   const [email,setEmail]=useState('instructor@hnu-test.local');
-  const [password,setPassword]=useState('ChangeMe-Development-Only!');
+  const [password,setPassword]=useState('12345678');
   const [error,setError]=useState('');
   const [message,setMessage]=useState('');
   const [loading,setLoading]=useState(false);

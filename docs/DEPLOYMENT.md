@@ -95,3 +95,7 @@ Secrets belong only in `deploy/.env.production` or a VPS secret manager. Rotate 
 ## Current boundary
 
 This commit prepares the repository for a VPS deployment; it does not claim that a real VPS, domain, DNS record, TLS certificate or production database has been provisioned. Final Production Hardening remains necessary for refresh-token rotation, password recovery and email verification, rate limiting, observability, external backups, migration versioning, load testing, self-hosted/pinned AI assets and disaster recovery.
+
+## Development demo login password
+
+For local demonstrations only, the seeded development accounts can be switched to the shared password `12345678` with `scripts/set-demo-password.sh`. The script refuses production-named environment files and production Compose files, updates only the clearly labelled `.local` demo accounts, and must never be run against the VPS production database. Replace all development credentials before institutional deployment.
