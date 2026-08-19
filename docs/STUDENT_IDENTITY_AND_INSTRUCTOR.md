@@ -41,3 +41,9 @@ The backend routes are `POST /api/v1/exams`, `POST /api/v1/questions`, `POST /ap
 ## Production privacy boundary
 
 The GitHub Pages site is a static interface preview. It must not receive real student codes or authenticated examination data. Real identity verification, PostgreSQL persistence, camera events, Python analysis, and WebSocket monitoring require the VPS deployment with protected environment variables and access-controlled database operations.
+
+## Bulk administration workspace
+
+Authorized administrators can open **إدارة الجامعة → ربط أكواد الطلاب**. The workspace loads the registry status and authenticated student candidates, shows total/pending/linked counts, supports direct code-to-account selection, accepts reviewed `studentCode,UserID` rows, displays a removable preview, and commits the selected mappings in one transaction. The backend endpoints are `GET /api/v1/organization/student-identities`, `GET /api/v1/organization/student-identities/candidates`, and `POST /api/v1/organization/student-identities/bulk-link`. All three are restricted to `super_admin` and `university_admin`; student and instructor tokens receive `403`.
+
+A failed row prevents the entire bulk request from being committed. The backend rejects invalid codes, non-student accounts, already-owned codes, and cross-account conflicts. Successful operations create an audit event. The public GitHub Pages build includes the interface shell but has no API URL and no real student data; the authenticated VPS deployment is required to load and mutate the registry.
