@@ -3,7 +3,7 @@ import { Camera, CheckCircle2, ShieldCheck, X, XCircle } from 'lucide-react';
 
 type CameraState = 'idle' | 'checking' | 'ready' | 'denied' | 'unsupported';
 
-export default function CameraCheck({ arabic, onClose }: { arabic: boolean; onClose: () => void }) {
+export default function CameraCheck({ arabic, onClose, onReady }: { arabic: boolean; onClose: () => void; onReady?: () => void }) {
   const [state, setState] = useState<CameraState>('idle');
   const [message, setMessage] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -49,7 +49,7 @@ export default function CameraCheck({ arabic, onClose }: { arabic: boolean; onCl
         {state === 'ready' ? <CheckCircle2 className="camera-success" size={20} /> : state === 'denied' || state === 'unsupported' ? <XCircle className="camera-error" size={20} /> : <ShieldCheck size={20} />}
         <div><strong>{state === 'ready' ? t('جاهز للمراقبة', 'Ready for monitoring') : t('المراقبة الشفافة', 'Transparent proctoring')}</strong><p>{message || t('يتم تسجيل إشارات فنية للمراجعة البشرية، ولا تُعتبر وحدها دليل مخالفة.', 'Technical signals are recorded for human review and are not proof of misconduct by themselves.')}</p></div>
       </div>
-      <div className="camera-check-actions"><button className="secondary" onClick={onClose}>{t('إغلاق', 'Close')}</button><button className="primary" onClick={startCheck} disabled={state === 'checking'}>{state === 'ready' ? t('إعادة الفحص', 'Run again') : t('ابدأ فحص الكاميرا', 'Start camera check')}</button></div>
+      <div className="camera-check-actions"><button className="secondary" onClick={onClose}>{t('إغلاق', 'Close')}</button>{state === 'ready' && onReady ? <button className="primary" onClick={onReady}><CheckCircle2 size={15}/>{t('متابعة إلى الامتحان', 'Continue to examination')}</button> : <button className="primary" onClick={startCheck} disabled={state === 'checking'}>{t('ابدأ فحص الكاميرا', 'Start camera check')}</button>}</div>
     </div>
   </div>;
 }
