@@ -1,5 +1,8 @@
 # secrets and local state
 .env
+.env.production
+.env.*.local
+/backups/
 .venv/
 __pycache__/
 node_modules/
