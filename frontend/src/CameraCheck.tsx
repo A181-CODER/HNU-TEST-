@@ -14,6 +14,12 @@ export default function CameraCheck({ arabic, onClose, onReady }: { arabic: bool
     streamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
+  useEffect(() => {
+    if (state === 'ready' && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [state]);
+
   async function startCheck() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setState('unsupported');
@@ -26,7 +32,6 @@ export default function CameraCheck({ arabic, onClose, onReady }: { arabic: bool
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
       setState('ready');
       setMessage(t('الكاميرا تعمل. سيتم تشغيل المراقبة الفعلية عند بدء الامتحان.', 'Camera is ready. Live proctoring starts when the examination begins.'));
     } catch {
